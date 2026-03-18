@@ -124,7 +124,6 @@ mode = st.sidebar.radio("Select Link Direction:", ["Tx Mode (Transmit)", "Rx Mod
 
 if mode == "Tx Mode (Transmit)":
     st.sidebar.subheader("📡 Tx RF & PA Settings")
-    # [FIXED] Re-added these 3 crucial input fields
     feed_power_dbm = st.sidebar.number_input("System Input Power (dBm)", value=0.0, step=1.0)
     pa_gain_db = st.sidebar.number_input("Single PA Gain (dB)", value=15.0, step=1.0)
     rad_eff_db = st.sidebar.slider("Antenna Radiation Efficiency (dB)", -5.0, 0.0, -2.0, step=0.5)
@@ -133,7 +132,7 @@ if mode == "Tx Mode (Transmit)":
     min_eirp_dbm = st.sidebar.number_input("3GPP Min Peak EIRP (dBm)", value=22.4, step=0.1)
     max_trp_dbm = st.sidebar.number_input("3GPP Max TRP (dBm)", value=23.0, step=0.1)
 
-    # Link Budget Calculations
+    # Core Calculations
     pin_pa_dbm = feed_power_dbm - (10 * np.log10(N_total) + backend_passive_loss_db)
     pout_pa_dbm = pin_pa_dbm + pa_gain_db
     power_at_antenna_element_dbm = pout_pa_dbm - tr_switch_il_db
@@ -142,12 +141,27 @@ if mode == "Tx Mode (Transmit)":
     trp_dbm = total_conducted_tx_dbm + rad_eff_db
     eirp_dbm = total_conducted_tx_dbm + array_spatial_gain_dbi
 
+    # --- TOP DATA PANEL ---
     st.subheader("📊 Tx Link Budget & 3GPP Compliance")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Per-PA Pout", f"{pout_pa_dbm:.1f} dBm")
     c2.metric("Power at Antenna", f"{power_at_antenna_element_dbm:.1f} dBm")
-    c3.metric("Array Spatial Gain", f"{array_spatial_gain_dbi:.2f} dBi", delta=f"Quantization Loss {quantization_loss_db:.2f} dB", delta_color="normal")
+    c3.metric("Array Spatial Gain", f"{array_spatial_gain_dbi:.2f} dBi", 
+              delta=f"Quantization Loss {quantization_loss_db:.2f} dB", delta_color="normal")
     c4.metric("Total Conducted Tx", f"{total_conducted_tx_dbm:.1f} dBm")
+
+    # --- BOTTOM DATA PANEL (The Re-added Section) ---
+    st.write("") 
+    st.markdown("**(Regulatory) 🎯 3GPP Class 3 Compliance Verification**")
+    c5, c6 = st.columns(2)
+    with c5:
+        trp_delta = trp_dbm - max_trp_dbm
+        st.metric("📦 Estimated TRP", f"{trp_dbm:.1f} dBm", 
+                  delta=f"{trp_delta:+.1f} dB (vs Max TRP)", delta_color="inverse")
+    with c6:
+        eirp_delta = eirp_dbm - min_eirp_dbm
+        st.metric("🚀 Estimated Peak EIRP", f"{eirp_dbm:.1f} dBm", 
+                  delta=f"{eirp_delta:+.1f} dB (vs Min EIRP)", delta_color="normal"))
     
 elif mode == "Rx Mode (Receive)":
     st.subheader("🎧 Rx Noise & Sensitivity Analysis")
