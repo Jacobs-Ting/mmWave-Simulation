@@ -161,8 +161,8 @@ if mode == "Tx Mode (Transmit)":
     with c6:
         eirp_delta = eirp_dbm - min_eirp_dbm
         st.metric("🚀 Estimated Peak EIRP", f"{eirp_dbm:.1f} dBm", 
-                  delta=f"{eirp_delta:+.1f} dB (vs Min EIRP)", delta_color="normal"))
-    
+                  delta=f"{eirp_delta:+.1f} dB (vs Min EIRP)", delta_color="normal")
+
 elif mode == "Rx Mode (Receive)":
     st.subheader("🎧 Rx Noise & Sensitivity Analysis")
     lna_gain_db = 20.0
