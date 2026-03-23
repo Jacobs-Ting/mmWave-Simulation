@@ -124,33 +124,47 @@ mode = st.sidebar.radio("Select Link Direction:", ["Tx Mode (Transmit)", "Rx Mod
 
 if mode == "Tx Mode (Transmit)":
     st.sidebar.subheader("📡 Tx RF & PA Settings")
+    pa_architecture = st.sidebar.radio(
+        "PA Architecture (硬體架構):", 
+        ["Distributed PA (分散式 AESA)", "Centralized PA (集中式單一PA)"]
+    )
+    
     feed_power_dbm = st.sidebar.number_input("System Input Power (dBm)", value=0.0, step=1.0)
-    pa_gain_db = st.sidebar.number_input("Single PA Gain (dB)", value=15.0, step=1.0)
+    pa_gain_db = st.sidebar.number_input("PA Gain (dB)", value=15.0, step=1.0)
     rad_eff_db = st.sidebar.slider("Antenna Radiation Efficiency (dB)", -5.0, 0.0, -2.0, step=0.5)
     
     st.sidebar.subheader("🎯 3GPP Tx Specifications")
     min_eirp_dbm = st.sidebar.number_input("3GPP Min Peak EIRP (dBm)", value=22.4, step=0.1)
     max_trp_dbm = st.sidebar.number_input("3GPP Max TRP (dBm)", value=23.0, step=0.1)
 
-    # Core Calculations
-    pin_pa_dbm = feed_power_dbm - (10 * np.log10(N_total) + backend_passive_loss_db)
-    pout_pa_dbm = pin_pa_dbm + pa_gain_db
-    power_at_antenna_element_dbm = pout_pa_dbm - tr_switch_il_db
+    if pa_architecture == "Distributed PA (分散式 AESA)":
+        st.info("🔄 **Path:** Source ➔ Splitter ➔ Phase Shifter ➔ **PA** ➔ Switch ➔ Antenna")
+        pin_per_pa_dbm = feed_power_dbm - (10 * np.log10(N_total) + backend_passive_loss_db)
+        pout_per_pa_dbm = pin_per_pa_dbm + pa_gain_db
+        power_at_antenna_element_dbm = pout_per_pa_dbm - tr_switch_il_db
+        pa_display_val = pout_per_pa_dbm
+        pa_display_label = "Per-PA Pout (分散式輸出)"
+
+    else:
+        st.warning("🔥 **Path:** Source ➔ **Huge PA** ➔ Splitter ➔ Phase Shifter ➔ Switch ➔ Antenna")
+        pout_central_pa_dbm = feed_power_dbm + pa_gain_db
+        power_after_split_dbm = pout_central_pa_dbm - (10 * np.log10(N_total) + backend_passive_loss_db)
+        power_at_antenna_element_dbm = power_after_split_dbm - tr_switch_il_db
+        pa_display_val = pout_central_pa_dbm
+        pa_display_label = "Central PA Pout (單一巨量輸出)"
+
     total_conducted_tx_dbm = power_at_antenna_element_dbm + 10 * np.log10(N_total)
-    
     trp_dbm = total_conducted_tx_dbm + rad_eff_db
     eirp_dbm = total_conducted_tx_dbm + array_spatial_gain_dbi
 
-    # --- TOP DATA PANEL ---
     st.subheader("📊 Tx Link Budget & 3GPP Compliance")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Per-PA Pout", f"{pout_pa_dbm:.1f} dBm")
+    c1.metric(pa_display_label, f"{pa_display_val:.1f} dBm")
     c2.metric("Power at Antenna", f"{power_at_antenna_element_dbm:.1f} dBm")
     c3.metric("Array Spatial Gain", f"{array_spatial_gain_dbi:.2f} dBi", 
               delta=f"Quantization Loss {quantization_loss_db:.2f} dB", delta_color="normal")
     c4.metric("Total Conducted Tx", f"{total_conducted_tx_dbm:.1f} dBm")
 
-    # --- BOTTOM DATA PANEL (The Re-added Section) ---
     st.write("") 
     st.markdown("**(Regulatory) 🎯 3GPP Class 3 Compliance Verification**")
     c5, c6 = st.columns(2)
@@ -164,31 +178,68 @@ if mode == "Tx Mode (Transmit)":
                   delta=f"{eirp_delta:+.1f} dB (vs Min EIRP)", delta_color="normal")
 
 elif mode == "Rx Mode (Receive)":
-    st.subheader("🎧 Rx Noise & Sensitivity Analysis")
-    lna_gain_db = 20.0
-    lna_nf_db = 3.0
-    bw_mhz = 100.0
-    snr_min_db = -1.0 + 2.5
-    target_eis_dbm = -88.0
+    st.sidebar.subheader("🎧 Rx RF & LNA Settings")
+    # --- 新增 Rx 架構與參數輸入 ---
+    rx_architecture = st.sidebar.radio(
+        "LNA Architecture (硬體架構):", 
+        ["Distributed LNA (分散式 AESA)", "Centralized LNA (集中式單一LNA)"]
+    )
+    
+    bw_mhz = st.sidebar.number_input("Channel Bandwidth (MHz)", value=100.0, step=10.0)
+    lna_gain_db = st.sidebar.number_input("LNA Gain (dB)", value=20.0, step=1.0)
+    lna_nf_db = st.sidebar.number_input("LNA Noise Figure (dB)", value=3.0, step=0.1)
+    snr_min_db = st.sidebar.number_input("Required SNR (dB)", value=1.5, step=0.5)
+    target_eis_dbm = st.sidebar.number_input("Target Peak EIS (dBm)", value=-88.0, step=1.0)
 
-    f_switch = 10 ** (tr_switch_il_db / 10)
-    g_switch_lin = 10 ** (-tr_switch_il_db / 10) 
+    st.subheader("🎧 Rx Noise & Sensitivity Analysis")
+
+    # 將 dB 轉為線性倍率供 Friis 公式使用
     f_lna = 10 ** (lna_nf_db / 10)
     g_lna_lin = 10 ** (lna_gain_db / 10)
+    f_switch = 10 ** (tr_switch_il_db / 10)
+    g_switch_lin = 10 ** (-tr_switch_il_db / 10) 
     f_passive = 10 ** (backend_passive_loss_db / 10)
     
-    f_cascaded = f_switch + (f_lna - 1) / g_switch_lin + (f_passive - 1) / (g_switch_lin * g_lna_lin)
+    # --- 根據架構計算 Cascaded Noise Figure ---
+    if rx_architecture == "Distributed LNA (分散式 AESA)":
+        st.info("🔄 **Path:** Antenna ➔ Switch ➔ **LNA** ➔ Phase Shifter ➔ Splitter ➔ Baseband")
+        # 分散式：天線進來經過小損耗開關後，立刻被 LNA 放大
+        # 公式: F_total = F_switch + (F_lna - 1)/G_switch + (F_passive - 1)/(G_switch * G_lna)
+        f_cascaded = f_switch + (f_lna - 1) / g_switch_lin + (f_passive - 1) / (g_switch_lin * g_lna_lin)
+        front_end_loss = tr_switch_il_db
+        
+    else:
+        st.warning("🔥 **Path:** Antenna ➔ Switch ➔ Phase Shifter ➔ Splitter ➔ **Central LNA** ➔ Baseband")
+        # 集中式：天線訊號必須先爬過開關、移相器、分流器這座「損耗大山」，最後才進到 LNA 放大
+        # 所有 LNA 之前的損耗加總起來，等同於直接疊加在系統雜訊指數上
+        total_front_loss_db = tr_switch_il_db + backend_passive_loss_db
+        f_front_passive = 10 ** (total_front_loss_db / 10)
+        g_front_passive = 10 ** (-total_front_loss_db / 10)
+        
+        # 公式: F_total = F_front_passive + (F_lna - 1)/G_front_passive
+        f_cascaded = f_front_passive + (f_lna - 1) / g_front_passive
+        front_end_loss = total_front_loss_db
+
     nf_cascaded_db = 10 * np.log10(f_cascaded)
+    
+    # 計算靈敏度與 EIS
     kTB_dbm = -174 + 10 * np.log10(bw_mhz * 1e6)
     conducted_sens_dbm = kTB_dbm + nf_cascaded_db + snr_min_db
     peak_eis_dbm = conducted_sens_dbm - array_spatial_gain_dbi
 
+    # --- 顯示介面 ---
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("1. Thermal Noise (kTB)", f"{kTB_dbm:.1f} dBm")
-    c2.metric("2. T/R Switch IL", f"{tr_switch_il_db:.1f} dB")
-    c3.metric("3. System Cascaded NF", f"{nf_cascaded_db:.2f} dB")
+    c2.metric("2. Pre-LNA Loss", f"{front_end_loss:.1f} dB")
+    
+    # 如果雜訊太高給出紅色警告
+    nf_status = "normal" if nf_cascaded_db <= (lna_nf_db + 3) else "inverse"
+    nf_delta_str = "Optimal" if nf_status == "normal" else "Dominated by Passive Loss!"
+    c3.metric("3. Cascaded System NF", f"{nf_cascaded_db:.2f} dB", delta=nf_delta_str, delta_color=nf_status)
+    
     c4.metric("4. Conducted Sensitivity", f"{conducted_sens_dbm:.2f} dBm")
 
+    st.write("") 
     st.markdown("**(OTA) 🛰️ Space Propagation & 3GPP Compliance**")
     c5, c6 = st.columns(2)
     c5.metric("📡 Rx Spatial Gain", f"+{array_spatial_gain_dbi:.2f} dBi", delta=f"Quantization Loss {quantization_loss_db:.2f} dB", delta_color="normal")
