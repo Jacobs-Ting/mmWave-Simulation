@@ -27,11 +27,15 @@ def get_2d_tapering(nx, ny, mode, sll):
     if mode == "Uniform (0 dB)":
         return np.ones((nx, ny)), 0.0
     else:
+        # Generate 1D Taylor windows (nbar=4 is standard)
         w_x = windows.taylor(nx, nbar=4, sll=sll) if nx > 1 else np.array([1.0])
         w_y = windows.taylor(ny, nbar=4, sll=sll) if ny > 1 else np.array([1.0])
+        # Outer product to get 2D matrix
         w_2d = np.outer(w_x, w_y)
+        # Normalize weights to peak = 1.0
         w_2d = w_2d / np.max(w_2d)
         
+        # Calculate Tapering Efficiency (Loss in dB)
         efficiency = (np.sum(w_2d)**2) / (N_total * np.sum(w_2d**2))
         taper_loss_db = 10 * np.log10(efficiency)
         return w_2d, taper_loss_db
@@ -117,7 +121,7 @@ for ix in range(Nx):
 AF_target_norm = np.abs(AF_target_val) / np.sum(taper_matrix)
 quantization_loss_db = 20 * np.log10(AF_target_norm + 1e-12)
 
-# --- FIXED: Power-based Scan Loss Logic ---
+# --- Power-based Scan Loss Logic ---
 EF_power = 1.0
 if "cos²" in element_type: 
     EF_power = np.maximum(0, np.cos(np.radians(theta_0)))**2
@@ -144,11 +148,11 @@ def compute_3d_pattern(Nx, Ny, kd, applied_phase_shifts, N_total, element_type, 
             AF += taper_matrix[ix, iy] * np.exp(1j * (spatial_phase + applied_phase_shifts[ix, iy]))
     AF_norm = np.abs(AF) / np.sum(taper_matrix)
     
-    # --- FIXED: Field-based Element Factor for Pattern Plotting ---
+    # --- Field-based Element Factor for Pattern Plotting ---
     if "cos²" in element_type:
-        EF_field = np.maximum(0, np.cos(THETA)) # Power is cos^2, Field is cos
+        EF_field = np.maximum(0, np.cos(THETA)) 
     elif "cos" in element_type:
-        EF_field = np.sqrt(np.maximum(0, np.cos(THETA))) # Power is cos, Field is sqrt(cos)
+        EF_field = np.sqrt(np.maximum(0, np.cos(THETA))) 
     else:
         EF_field = np.ones_like(THETA)
         
@@ -195,11 +199,12 @@ elif mode == "Rx Mode (Receive)":
     st.subheader("🎧 Rx Noise & Sensitivity Analysis (with 2D Tapering Compensation)")
     rx_arch = st.sidebar.radio("LNA Architecture:", ["Distributed LNA", "Centralized LNA"])
     
-    col_rx1, col_rx2, col_rx3 = st.columns(3)
-    bw_mhz = col_rx1.number_input("Channel Bandwidth (MHz)", value=100.0, step=10.0, min_value=1.0)
+    # --- FIXED: Moved SNR Input into the Main Dashboard (4 Columns) ---
+    col_rx1, col_rx2, col_rx3, col_rx4 = st.columns(4)
+    bw_mhz = col_rx1.number_input("Channel Bandwidth (MHz)", value=50.0, step=10.0, min_value=1.0)
     lna_gain_db = col_rx2.number_input("LNA Gain (dB)", value=20.0, step=1.0)
-    lna_nf_db = col_rx3.number_input("LNA Noise Figure (dB)", value=3.0, step=0.1)
-    snr_min_db = st.sidebar.number_input("Required System SNR (dB)", value=1.5, step=0.5)
+    lna_nf_db = col_rx3.number_input("LNA Noise Figure (dB)", value=1.5, step=0.1)
+    snr_min_db = col_rx4.number_input("Required System SNR (dB)", value=1.5, step=0.5)
 
     f_lna = 10 ** (lna_nf_db / 10)
     g_lna_lin = 10 ** (lna_gain_db / 10)
@@ -267,7 +272,7 @@ for ix in range(Nx):
 
 AF_1d_norm = np.abs(AF_1d) / np.sum(taper_matrix)
 
-# --- FIXED: Field-based Element Factor for 2D Cut ---
+# --- Field-based Element Factor for 2D Cut ---
 if "cos²" in element_type:
     EF_1d = np.maximum(0, np.cos(theta_1d))
 elif "cos" in element_type:
