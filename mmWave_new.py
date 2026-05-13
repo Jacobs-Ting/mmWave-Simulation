@@ -27,15 +27,11 @@ def get_2d_tapering(nx, ny, mode, sll):
     if mode == "Uniform (0 dB)":
         return np.ones((nx, ny)), 0.0
     else:
-        # Generate 1D Taylor windows (nbar=4 is standard)
         w_x = windows.taylor(nx, nbar=4, sll=sll) if nx > 1 else np.array([1.0])
         w_y = windows.taylor(ny, nbar=4, sll=sll) if ny > 1 else np.array([1.0])
-        # Outer product to get 2D matrix
         w_2d = np.outer(w_x, w_y)
-        # Normalize weights to peak = 1.0
         w_2d = w_2d / np.max(w_2d)
         
-        # Calculate Tapering Efficiency (Loss in dB)
         efficiency = (np.sum(w_2d)**2) / (N_total * np.sum(w_2d**2))
         taper_loss_db = 10 * np.log10(efficiency)
         return w_2d, taper_loss_db
@@ -121,20 +117,23 @@ for ix in range(Nx):
 AF_target_norm = np.abs(AF_target_val) / np.sum(taper_matrix)
 quantization_loss_db = 20 * np.log10(AF_target_norm + 1e-12)
 
-EF_target_mag = 1.0
-if "cos²" in element_type: EF_target_mag = np.maximum(0, np.cos(np.radians(theta_0))**2)
-elif "cos" in element_type: EF_target_mag = np.maximum(0, np.cos(np.radians(theta_0)))
-scan_loss_db = -20 * np.log10(EF_target_mag + 1e-12) if theta_0 < 89 else 40.0
+# --- FIXED: Power-based Scan Loss Logic ---
+EF_power = 1.0
+if "cos²" in element_type: 
+    EF_power = np.maximum(0, np.cos(np.radians(theta_0)))**2
+elif "cos" in element_type: 
+    EF_power = np.maximum(0, np.cos(np.radians(theta_0)))
+
+# 10*log10 used here because EF_power is already a power ratio
+scan_loss_db = -10 * np.log10(EF_power + 1e-12) if theta_0 < 89 else 40.0
 
 split_stages = np.log2(N_total) if N_total > 1 else 0
 backend_passive_loss_db = (split_stages * splitter_il_db) + ps_il_db 
-# Final Gain = N_Gain + Elem_Gain - Scan_Loss + Quant_Loss + Tapering_Loss
 array_spatial_gain_dbi = 10 * np.log10(N_total) + elem_gain_dbi - scan_loss_db + quantization_loss_db + tapering_loss_db
 
 # Shared 3D rendering computation block
 @st.cache_data
 def compute_3d_pattern(Nx, Ny, kd, applied_phase_shifts, N_total, element_type, taper_matrix):
-    # --- HIGHER RESOLUTION FOR PENCIL BEAMS ---
     theta = np.linspace(0, np.pi/2, 200)
     phi = np.linspace(-np.pi, np.pi, 200)
     THETA, PHI = np.meshgrid(theta, phi)
@@ -144,8 +143,16 @@ def compute_3d_pattern(Nx, Ny, kd, applied_phase_shifts, N_total, element_type, 
             spatial_phase = ix * kd * np.sin(THETA)*np.cos(PHI) + iy * kd * np.sin(THETA)*np.sin(PHI)
             AF += taper_matrix[ix, iy] * np.exp(1j * (spatial_phase + applied_phase_shifts[ix, iy]))
     AF_norm = np.abs(AF) / np.sum(taper_matrix)
-    EF = np.cos(THETA)**2 if "cos²" in element_type else (np.cos(THETA) if "cos" in element_type else np.ones_like(THETA))
-    Total_Pattern_Linear = AF_norm * EF
+    
+    # --- FIXED: Field-based Element Factor for Pattern Plotting ---
+    if "cos²" in element_type:
+        EF_field = np.maximum(0, np.cos(THETA)) # Power is cos^2, Field is cos
+    elif "cos" in element_type:
+        EF_field = np.sqrt(np.maximum(0, np.cos(THETA))) # Power is cos, Field is sqrt(cos)
+    else:
+        EF_field = np.ones_like(THETA)
+        
+    Total_Pattern_Linear = AF_norm * EF_field
     R = Total_Pattern_Linear
     return R * np.sin(THETA) * np.cos(PHI), R * np.sin(THETA) * np.sin(PHI), R * np.cos(THETA), Total_Pattern_Linear
 
@@ -248,32 +255,30 @@ fig_3d.update_layout(
     paper_bgcolor="#0e1117", plot_bgcolor="#0e1117"
 )
 
-# --- NEW: 2D Elevation Cut Computation ---
-# We calculate a precise 1D array factor sweep along the target Azimuth plane (phi = phi_0)
+# --- 2D Elevation Cut Computation ---
 phi_cut_rad = np.radians(phi_0)
 theta_1d = np.linspace(-np.pi/2, np.pi/2, 400)
 AF_1d = np.zeros_like(theta_1d, dtype=complex)
 
 for ix in range(Nx):
     for iy in range(Ny):
-        # spatial phase sweeping across Theta from -90 to +90 degrees at the target Phi
         sp = ix * kd * np.sin(theta_1d)*np.cos(phi_cut_rad) + iy * kd * np.sin(theta_1d)*np.sin(phi_cut_rad)
         AF_1d += taper_matrix[ix, iy] * np.exp(1j * (sp + applied_phase_shifts[ix, iy]))
 
 AF_1d_norm = np.abs(AF_1d) / np.sum(taper_matrix)
 
-# 1D Element Factor
+# --- FIXED: Field-based Element Factor for 2D Cut ---
 if "cos²" in element_type:
-    EF_1d = np.cos(theta_1d)**2
+    EF_1d = np.maximum(0, np.cos(theta_1d))
 elif "cos" in element_type:
-    EF_1d = np.cos(theta_1d)
+    EF_1d = np.sqrt(np.maximum(0, np.cos(theta_1d)))
 else:
     EF_1d = np.ones_like(theta_1d)
 
-Pattern_1d_Linear = AF_1d_norm * np.maximum(0, EF_1d)
+Pattern_1d_Linear = AF_1d_norm * EF_1d
 Gain_1d_dBi = baseline_gain + 20 * np.log10(Pattern_1d_Linear + 1e-12)
 
-# --- NEW: 2D Plot Generation ---
+# --- 2D Plot Generation ---
 fig_2d = go.Figure()
 fig_2d.add_trace(go.Scatter(
     x=np.degrees(theta_1d), y=Gain_1d_dBi, mode='lines', 
